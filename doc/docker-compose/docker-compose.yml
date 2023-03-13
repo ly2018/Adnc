@@ -12,6 +12,7 @@ services:
       - ./frontend:/usr/share/frontend
       - ./log:/usr/share/log
       
+      
   redis:
     image: redis:latest
     container_name: redis
