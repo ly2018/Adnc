@@ -1,0 +1,161 @@
+version: '3'
+services:
+  sewebssl:
+    restart: always
+    image: nginx:1.11.6-alpine
+    ports:
+      - 8080:80
+      - 80:80
+      - 443:443
+    volumes:
+      - ./backend:/usr/share/backend
+      - ./frontend:/usr/share/frontend
+      - ./log:/usr/share/log
+      
+  redis:
+    image: redis:latest
+    container_name: redis
+    command: redis-server --appendonly yes --requirepass vic_2023
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redisdata:/usr/share/redisdata
+      
+  mongodb:
+    image: mongo:4.4.3
+    container_name: mongodb
+    command: --wiredTigerCacheSizeGB 4 --auth
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME:vic_2023 
+      - MONGO_INITDB_ROOT_PASSWORD:vic_2023 
+      - TZ:Asia/Shanghai 
+    restart: always
+    ports:
+      - "13017:27017"
+    volumes:
+      - ./data/mongo:/data/mongo
+      - ./data/mongo/backup:/usr/share/mongo/backup
+      
+  mariadb:
+    image: mariadb:10.4
+    container_name: mariadb
+    ports:
+      - "13306:3306"
+    restart: always
+    environment:
+      - MARIADB_ROOT_PASSWORD=vic_2023
+    volumes:
+      - ./data/mariadb:/data/mariadb
+      - ./data/mariadb/backup:/usr/share/mariadb/backup
+    
+  rabbitmq:
+    image: rabbitmq:3.7.28-management
+    restart: always
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    hostname: rabbitmq
+    container_name: rabbitmq
+    environment:
+      - TZ=Asia/Shanghai #设定东八区的城市，防止Oap记录数据时用0时区
+      - RABBITMQ_DEFAULT_USER=victest
+      - RABBITMQ_DEFAULT_PASS=victest
+      - STOMP_DEFAULT_USER=victest
+      - STOMP_DEFAULT_PASS=victest
+    volumes:
+      - /data/mqdata/rabbitmq:/var/lib/rabbitmq
+      - /etc/localtime:/etc/localtime
+
+  consul1:
+    image: consul:latest
+    container_name: consul1
+    restart: always
+    command: agent -server -client=0.0.0.0 -bootstrap-expect=3 -node=consul1
+    volumes:
+      - /usr/local/docker_my/consul/consul1/data:/consul/data
+      - /usr/local/docker_my/consul/consul1/config:/consul/config
+  consul2:
+    image: consul:latest
+    container_name: consul2
+    restart: always
+    command: agent -server -client=0.0.0.0 -retry-join=consul1 -node=consul2
+    volumes:
+      - /usr/local/docker_my/consul/consul2/data:/consul/data
+      - /usr/local/docker_my/consul/consul2/config:/consul/config
+  consul3:
+    image: consul:latest
+    container_name: consul3
+    restart: always
+    command: agent -server -client=0.0.0.0 -retry-join=consul1 -node=consul3
+    volumes:
+      - /usr/local/docker_my/consul/consul3/data:/consul/data
+      - /usr/local/docker_my/consul/consul3/config:/consul/config
+  consul4:
+    image: consul:latest
+    container_name: consul4
+    restart: always
+    ports:
+      - 8500:8500
+    command: agent -client=0.0.0.0 -retry-join=consul1 -ui -node=client1
+    volumes:
+      - /usr/local/docker_my/consul/consul4/data:/consul/data
+      - /usr/local/docker_my/consul/consul4/config:/consul/config
+      
+      
+  #elastic 镜像
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.13.1
+    container_name: es01
+    volumes:
+      - ./data/es:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+      
+
+  #kibana 可视化查询，暴露 5601
+  kibana:
+    image: kibana
+    links:
+      - es01
+    ports:
+      - 5601:5601
+    depends_on:
+      - "es01"
+      
+  #skywalking
+  oap:
+    image: apache/skywalking-oap-server:6.2.0
+    container_name: skywalking-oap
+    restart: always
+    ports:
+      - 11800:11800
+      - 12800:12800
+    environment:
+      - SW_STORAGE=es01 #Es的存储
+      - SW_STORAGE_ES_CLUSTER_NODES=${ES_NODE} # Es的节点地址，从.env文件中取
+      - TZ=Asia/Shanghai #设定东八区的城市，防止Oap记录数据时用0时区
+  ui:
+    image: apache/skywalking-ui:6.2.0
+    container_name: skywalking-ui
+    depends_on:
+      - oap
+    links:
+      - oap
+    restart: always
+    ports:
+      - 18080:8080 #默认8080端口，这里设置18080映射到宿主机，可修改
+    environment:
+      collector.ribbon.listOfServers: oap:12800
+      
+volumes:
+  data01:
+    driver: local
+  data02:
+    driver: local
+  data03:
+    driver: local
+
+networks:
+  elastic:
+    driver: bridge
